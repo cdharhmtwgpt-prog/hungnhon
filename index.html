@@ -137,7 +137,7 @@
 /* ======================================================================
    CẤU HÌNH — điền URL Apps Script sau khi deploy (xem Code.gs / hướng dẫn)
    ====================================================================== */
-const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwdukhFDZEERm7SY8s8CfUxw0-Tpy2x9fcNJcZvY1UWIVUNCVsXcdRTOATrvPhrsSEpdQ/exec";
+const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbww8MN9Cny8L1eC7IEdc_ZcamxRn2M-hLVnqkCIDkIMzGov-IMw0IwET7RM02zSgqLNaw/exec";
 const STORAGE_KEY = "hungnhon_sotuchi_v1";
 const STAFF = ["Chị Vân", "Phát", "Phương"]; // phải khớp STAFF_LIST trong Code.gs
 
@@ -306,6 +306,14 @@ function showToast(msg){
 
 function setTab(t){ state.tab=t; render(); }
 function setField(k,v){ state.form[k]=v; render(); }
+// Gõ số tiền / nội dung chi: chỉ cập nhật state, KHÔNG gọi render() toàn màn hình
+// (render lại sẽ tạo input mới → mất focus → bàn phím tự đóng trên điện thoại).
+function onAmountInput(v){
+  state.form.amount = v;
+  const btn = document.getElementById('submitBtn');
+  if(btn) btn.style.opacity = (Number(v)>0) ? '1' : '0.5';
+}
+function onNoteInput(v){ state.form.note = v; }
 function setEntryType(t){ state.entryType=t; render(); }
 function setChiMode(m){ state.chiMode=m; render(); }
 function setStaff(s){ state.form.staff=s; render(); }
@@ -452,8 +460,8 @@ function renderEntry(){
 
     <div class="field" style="margin-bottom:var(--space-4)">
       <label>Số tiền</label>
-      <input class="input" type="number" inputmode="decimal" placeholder="0" value="${esc(f.amount)}"
-        oninput="setField('amount', this.value)" style="font-size:24px;font-weight:600;height:50px">
+      <input id="amountInput" class="input" type="number" inputmode="decimal" placeholder="0" value="${esc(f.amount)}"
+        oninput="onAmountInput(this.value)" style="font-size:24px;font-weight:600;height:50px">
     </div>
 
     <div class="field" style="margin-bottom:var(--space-4)">
@@ -475,11 +483,11 @@ function renderEntry(){
         </div>` : `
         <div class="field" style="margin-bottom:var(--space-3)">
           <label>Nội dung chi</label>
-          <input class="input" type="text" placeholder="VD: Thuốc đắp, Grap giường, Tiền nhà…" value="${esc(f.note)}" oninput="setField('note', this.value)">
+          <input id="noteInput" class="input" type="text" placeholder="VD: Thuốc đắp, Grap giường, Tiền nhà…" value="${esc(f.note)}" oninput="onNoteInput(this.value)">
         </div>`}
     ` : ''}
 
-    <button class="btn btn-primary btn-block" style="height:52px;font-size:16px;opacity:${canSubmit?1:0.5}" onclick="submitEntry()">Lưu vào Google Sheet</button>
+    <button id="submitBtn" class="btn btn-primary btn-block" style="height:52px;font-size:16px;opacity:${canSubmit?1:0.5}" onclick="submitEntry()">Lưu vào Google Sheet</button>
   `;
 }
 
