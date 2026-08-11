@@ -137,7 +137,7 @@
 /* ======================================================================
    CẤU HÌNH — điền URL Apps Script sau khi deploy (xem Code.gs / hướng dẫn)
    ====================================================================== */
-const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbww8MN9Cny8L1eC7IEdc_ZcamxRn2M-hLVnqkCIDkIMzGov-IMw0IwET7RM02zSgqLNaw/exec";
+const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbw2w8M3n0K2Amqs_ReFYbxpF9us-i7Gyinvo1gEAPxKb_-pycG1g-KaYzunZXjl7dgxXw/exec";
 const STORAGE_KEY = "hungnhon_sotuchi_v1";
 const STAFF = ["Chị Vân", "Phát", "Phương"]; // phải khớp STAFF_LIST trong Code.gs
 
@@ -309,9 +309,12 @@ function setField(k,v){ state.form[k]=v; render(); }
 // Gõ số tiền / nội dung chi: chỉ cập nhật state, KHÔNG gọi render() toàn màn hình
 // (render lại sẽ tạo input mới → mất focus → bàn phím tự đóng trên điện thoại).
 function onAmountInput(v){
-  state.form.amount = v;
+  const digits = v.replace(/[^0-9]/g, '');
+  state.form.amount = digits;
+  const el = document.getElementById('amountInput');
+  if(el && el.value !== digits) el.value = digits;
   const btn = document.getElementById('submitBtn');
-  if(btn) btn.style.opacity = (Number(v)>0) ? '1' : '0.5';
+  if(btn) btn.style.opacity = (Number(digits)>0) ? '1' : '0.5';
 }
 function onNoteInput(v){ state.form.note = v; }
 function setEntryType(t){ state.entryType=t; render(); }
@@ -460,7 +463,7 @@ function renderEntry(){
 
     <div class="field" style="margin-bottom:var(--space-4)">
       <label>Số tiền</label>
-      <input id="amountInput" class="input" type="number" inputmode="decimal" placeholder="0" value="${esc(f.amount)}"
+      <input id="amountInput" class="input" type="text" inputmode="numeric" pattern="[0-9]*" placeholder="0" value="${esc(f.amount)}"
         oninput="onAmountInput(this.value)" style="font-size:24px;font-weight:600;height:50px">
     </div>
 
