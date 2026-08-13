@@ -210,12 +210,30 @@ function allTransactions(){
   return out;
 }
 
-/* ================= Mạng: gọi Apps Script ================= */
+/* ================= Mạng: gọi Apps Script =================
+   Có timeout (tránh treo vô thời hạn khi Apps Script "cold start" chậm) và
+   chỉ tải đúng (các) tháng cần thiết để phản hồi nhanh hơn — thay vì luôn
+   tải cả tháng trước dù không cần. */
+function fetchWithTimeout(url, options, timeoutMs){
+  const controller = new AbortController();
+  const id = setTimeout(function(){ controller.abort(); }, timeoutMs || 9000);
+  return fetch(url, Object.assign({}, options, { signal: controller.signal }))
+    .finally(function(){ clearTimeout(id); });
+}
+// Tuần hiện tại (Thứ 2 → CN) chỉ lấn sang tháng trước vào vài ngày đầu tháng —
+// những ngày còn lại chỉ cần tải đúng 1 tháng, nhanh hơn hẳn.
+function neededMonthKeys(){
+  const now = new Date();
+  const keys = [monthKeyOffset(0)];
+  const mon = mondayOfWeek(now);
+  if(mon.getMonth() !== now.getMonth()) keys.push(monthKeyOffset(-1));
+  return keys;
+}
 async function fetchMonths(monthKeys){
   if(!urlConfigured()) return false;
   try{
     const url = APPS_SCRIPT_URL + '?months=' + encodeURIComponent(monthKeys.join(','));
-    const res = await fetch(url);
+    const res = await fetchWithTimeout(url, {}, 9000);
     const data = await res.json();
     if(!data.ok) return false;
     monthKeys.forEach(mk=>{
@@ -229,11 +247,11 @@ async function fetchMonths(monthKeys){
 // OPTIONS — Apps Script Web App không tự xử lý preflight, đây là cách né lỗi CORS
 // phổ biến khi gọi Apps Script từ web ngoài.
 async function postEntry(tx){
-  const res = await fetch(APPS_SCRIPT_URL, {
+  const res = await fetchWithTimeout(APPS_SCRIPT_URL, {
     method:'POST',
     headers: {'Content-Type':'text/plain;charset=utf-8'},
     body: JSON.stringify({ date:tx.date, type:tx.type, amount:tx.amount, note:tx.note||'', staff:tx.staff||'' }),
-  });
+  }, 9000);
   const data = await res.json();
   return !!(data && data.ok);
 }
@@ -248,7 +266,13 @@ async function syncAll(showMsg){
       if(!ok) stillPending.push(p);
     }
     state.pending = stillPending;
-    const ok2 = await fetchMonths([monthKeyOffset(0), monthKeyOffset(-1)]);
+    let ok2 = await fetchMonths(neededMonthKeys());
+    if(!ok2){
+      // Apps Script "cold start" đôi khi chậm/timeout lần đầu — tự thử lại
+      // 1 lần sau 2 giây trước khi báo thất bại, để đỡ bị "lúc được lúc không".
+      await new Promise(function(r){ setTimeout(r, 2000); });
+      ok2 = await fetchMonths(neededMonthKeys());
+    }
     state.syncing = false;
     if(ok2) state.lastSyncLabel = 'vừa xong';
     saveCache(); render();
@@ -279,9 +303,9 @@ function submitEntry(){
         state.pending = state.pending.filter(p=>p.id!==tx.id);
         fetchMonths([monthKeyFromYmd(tx.date)]).then(()=>{ saveCache(); render(); showToast('Đã đồng bộ lên Google Sheet'); });
       } else {
-        saveCache(); render(); showToast('Chưa đồng bộ được — sẽ tự thử lại khi bấm "Đồng bộ ngay"');
+        saveCache(); render(); showToast('Chưa đồng bộ được — sẽ tự thử lại trong ít phút');
       }
-    }).catch(function(){ saveCache(); render(); showToast('Chưa đồng bộ được — sẽ tự thử lại khi bấm "Đồng bộ ngay"'); });
+    }).catch(function(){ saveCache(); render(); showToast('Chưa đồng bộ được — sẽ tự thử lại trong ít phút'); });
   } else {
     showToast('Chưa cấu hình Apps Script URL — dữ liệu chỉ lưu tạm trên máy');
   }
@@ -316,6 +340,17 @@ function onAmountInput(v){
   if(btn) btn.style.opacity = (Number(digits)>0) ? '1' : '0.5';
 }
 function onNoteInput(v){ state.form.note = v; }
+// Nút "+000": bấm để nhân nhanh số đã gõ lên 1000 lần (150 -> 150000)
+function appendZeros(suffix){
+  const current = (state.form.amount || '').replace(/^0+(?=\d)/, '');
+  if(!current || current === '0') return;
+  const digits = (current + suffix).replace(/[^0-9]/g, '');
+  state.form.amount = digits;
+  const el = document.getElementById('amountInput');
+  if(el) el.value = digits;
+  const btn = document.getElementById('submitBtn');
+  if(btn) btn.style.opacity = (Number(digits)>0) ? '1' : '0.5';
+}
 function setEntryType(t){ state.entryType=t; state.form.amount=''; render(); }
 function setChiMode(m){ state.chiMode=m; render(); }
 function setStaff(s){ state.form.staff=s; render(); }
@@ -347,6 +382,16 @@ function recentTx(){
     if(a.date!==b.date) return a.date<b.date ? 1 : -1;
     return String(b.id) > String(a.id) ? 1 : -1;
   }).slice(0,6);
+}
+// Toàn bộ giao dịch của tháng hiện tại (thay cho danh sách "gần đây" giới hạn 6 dòng)
+function currentMonthTx(){
+  const key = monthKeyOffset(0);
+  return allTransactions()
+    .filter(function(t){ return monthKeyFromYmd(t.date) === key; })
+    .sort(function(a,b){
+      if(a.date!==b.date) return a.date<b.date ? 1 : -1;
+      return String(b.id) > String(a.id) ? 1 : -1;
+    });
 }
 
 function computeMonthReport(){
@@ -389,18 +434,11 @@ function configBanner(){
 
 function renderHome(){
   const w = computeWeek();
-  const tx = recentTx();
+  const tx = currentMonthTx();
   return `
     ${configBanner()}
     <div class="kicker">Phòng bấm huyệt Hưng Nhơn</div>
     <h1 style="font-size:24px;margin-bottom:14px">Sổ thu chi</h1>
-
-    <div class="card elev-sm row-between" style="margin-bottom:var(--space-4)">
-      <div style="font-size:13px">
-        <span class="muted">Tự động đồng bộ 2 chiều với Google Sheet</span><br>Đồng bộ lần cuối: ${esc(state.lastSyncLabel)}
-      </div>
-      <button class="btn btn-secondary" onclick="syncAll(true)">${state.syncing? 'Đang đồng bộ…' : 'Đồng bộ ngay'}</button>
-    </div>
 
     <div class="card elev-sm" style="margin-bottom:var(--space-4)">
       <div class="card-kicker">Tuần này (${w.rangeLabel})</div>
@@ -426,11 +464,11 @@ function renderHome(){
     </div>
 
     <div class="row-between" style="align-items:baseline;margin-bottom:var(--space-2)">
-      <div class="section-title" style="margin-bottom:0">Giao dịch gần đây</div>
+      <div class="section-title" style="margin-bottom:0">Giao dịch tháng này</div>
       <a href="#" onclick="setTab('report');return false;" style="font-size:12px">Xem báo cáo tháng →</a>
     </div>
     <div style="display:flex;flex-direction:column;gap:var(--space-2)">
-      ${tx.length===0 ? '<div class="empty-state">Chưa có giao dịch nào.</div>' : tx.map(t=>{
+      ${tx.length===0 ? '<div class="empty-state">Chưa có giao dịch nào trong tháng.</div>' : tx.map(t=>{
         const dateLabel = t.date.slice(8,10)+'/'+t.date.slice(5,7);
         const title = t.type==='thu' ? 'Doanh thu ngày' : (t.note || 'Chi phí');
         const amountLabel = (t.type==='thu'?'+':'-') + fmt(t.amount);
@@ -462,8 +500,11 @@ function renderEntry(){
 
     <div class="field" style="margin-bottom:var(--space-4)">
       <label>Số tiền</label>
-      <input id="amountInput" class="input" type="text" inputmode="numeric" pattern="[0-9]*" placeholder="0" value="${esc(f.amount)}"
-        oninput="onAmountInput(this.value)" style="font-size:24px;font-weight:600;height:50px">
+      <div style="display:flex;gap:8px">
+        <input id="amountInput" class="input" type="text" inputmode="numeric" pattern="[0-9]*" placeholder="0" value="${esc(f.amount)}"
+          oninput="onAmountInput(this.value)" style="font-size:24px;font-weight:600;height:50px;flex:1;min-width:0">
+        <button type="button" class="btn btn-secondary" style="flex:none;width:68px;font-size:15px" onclick="appendZeros('000')">+000</button>
+      </div>
     </div>
 
     <div class="field" style="margin-bottom:var(--space-4)">
